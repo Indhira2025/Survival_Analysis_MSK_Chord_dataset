@@ -1,0 +1,82 @@
+---
+title: "Exploratory graphics"
+output: html_document
+date: "2026-01-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library(data.table)
+library(ggplot2)
+theme_set(theme_minimal()) # personal preference - feel free to change!
+```
+
+```{r}
+# CHANGE THIS to match the data path on your computer
+datadir <- "~/data/msk_chord_2024/data/"
+
+# Load the data
+clin_patient <- fread(paste0(datadir, "data_clinical_patient.txt"), skip = 4)
+clin_sample  <- fread(paste0(datadir, "data_clinical_sample.txt"), skip = 4)
+muta <- fread(paste0(datadir, "data_mutations.txt"))
+cna  <- fread(paste0(datadir, "data_cna.txt"))
+sv   <- fread(paste0(datadir, "data_sv.txt"))
+```
+
+# What do we have?
+
+Sample-level information
+```{r}
+colnames(clin_sample)
+```
+
+Patient-level information
+```{r}
+colnames(clin_patient)
+```
+
+# Example: mutation count per cancer type
+```{r}
+
+muta_with_patient <- merge(
+    muta,
+    clin_sample[, .(SAMPLE_ID, PATIENT_ID, CANCER_TYPE)],
+    by.x = "Tumor_Sample_Barcode",
+    by.y = "SAMPLE_ID",
+    all.x = TRUE
+  )
+
+forplot <- muta_with_patient[, .N, by = .(Hugo_Symbol, CANCER_TYPE)]
+ggplot(forplot, aes(x = CANCER_TYPE, y = N)) +
+  geom_boxplot(outliers = FALSE) +
+  coord_flip()
+```
+
+# Example: Mutations heatmap 
+Show top 10 mutated genes × samples, colored by mutation type. Facet or group by cancer type.
+(Maybe just for a subset of patients!)
+
+# Example: Co-mutation plot
+For a given cancer type, show which gene pairs tend to be mutated together vs mutually exclusive. (Maybe a matrix of odds ratios or correlation coefficients?)
+
+# Example: Copy number aberration comparison
+Pick two samples with different CNA patterns and plot them stacked for comparison. 
+Maybe: Add gene annotations for known oncogenes/tumor suppressors at their chromosomal positions.
+
+# Example: Treatment timeline visualization
+For a single patient, create a timeline showing: diagnosis, treatments (as horizontal bars), progression events (as points), and when sequencing occurred.
+
+# Example: Metastatic site patterns
+Which tumor sites co-occur? Create a heatmap or network showing how often pairs of metastatic sites appear together in the same patient.
+
+# Example: Survival curves by genomic features
+Create Kaplan-Meier curves comparing patients with/without a specific mutation, stratified by cancer type. 
+
+# Mutation signatures over chromosomes
+For one cancer type, plot mutation density across the genome (binned). Are there mutational "hotspots"?
+
