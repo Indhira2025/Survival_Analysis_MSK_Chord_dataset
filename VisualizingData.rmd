@@ -17,8 +17,10 @@ theme_set(theme_minimal()) # personal preference - feel free to change!
 ```
 
 ```{r}
+
 # CHANGE THIS to match the data path on your computer
-datadir <- "~/data/msk_chord_2024/data/"
+getwd()
+datadir <- "MSK_Dashboard/Data/"
 
 # Load the data
 clin_patient <- fread(paste0(datadir, "data_clinical_patient.txt"), skip = 4)
@@ -26,6 +28,46 @@ clin_sample  <- fread(paste0(datadir, "data_clinical_sample.txt"), skip = 4)
 muta <- fread(paste0(datadir, "data_mutations.txt"))
 cna  <- fread(paste0(datadir, "data_cna.txt"))
 sv   <- fread(paste0(datadir, "data_sv.txt"))
+
+str(clin_patient)
+str(clin_sample)
+str(muta)
+str(cna)
+str(sv)
+head(clin_patient)
+colnames(clin_patient)
+
+# Ensure survival variable
+clin_patient$OS_STATUS_BIN <- ifelse(grepl("DECEASED", clin_patient$OS_STATUS), 1, 0)
+clin_patient <- as.data.table(clin_patient)
+clin_patient <- as.data.table(clin_patient)
+
+# Merge by PATIENT_ID
+merged_data <- merge(clin_sample, clin_patient, by = "PATIENT_ID", all.x = TRUE)
+head(merged_data)
+
+library(dplyr)
+
+merged_data %>%
+  group_by(CANCER_TYPE, OS_STATUS_BIN) %>%
+  summarise(n = n()) %>%
+  arrange(CANCER_TYPE)
+
+
+# Subset correctly
+bc <- merged_data[merged_data$CANCER_TYPE == "Breast Cancer", ]
+
+# Fit survival curve
+fit <- survfit(Surv(OS_MONTHS, OS_STATUS_BIN) ~ 1, data = bc)
+
+# Plot
+ggsurvplot(fit,
+           risk.table = TRUE,
+           conf.int = TRUE,
+           xlab = "Months",
+           ylab = "Survival Probability",
+           title = "Overall Survival for Breast Cancer")
+
 ```
 
 # What do we have?
