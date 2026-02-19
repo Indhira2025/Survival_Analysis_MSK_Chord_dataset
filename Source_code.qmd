@@ -21,32 +21,44 @@ library(pROC)
 # Reading the clinical patient data
 
 clinical_patient <- read.delim("msk_chord_2024_data/data_clinical_patient.txt", 
-                   header = TRUE, 
                    sep = "\t", 
+                   skip = 4,
+                   header = TRUE,
                    stringsAsFactors = FALSE)
-#View(clinical_patient)
+head(clinical_patient)
 
 names(clinical_patient)
 typeof(clinical_patient)
 #str(clinical_patient)
-clinical_patient <- clinical_patient %>%
-  rename(PATIENT_ID = X.Patient.Identifier)
 
 
-clinical_patient[clinical_patient$X.Patient.Identifier == "P-0001340",]
+
+clinical_patient[clinical_patient$PATIENT_ID == "P-0001340",]
+clinical_features <- clinical_patient %>%
+  select(PATIENT_ID,
+         GENDER,
+         RACE,
+         ETHNICITY,
+         CURRENT_AGE_DEID,
+         SMOKING_PREDICTIONS_3_CLASSES,
+         OS_MONTHS,
+         OS_STATUS)
+clinical_features
+
 ```
 
 ```{r}
 
 library(kableExtra)
 clinical_sample <- read.delim("msk_chord_2024_data/data_clinical_sample.txt", comment.char="#")
-#View(clinical_sample)
+View(clinical_sample)
 kable(table(clinical_sample$CANCER_TYPE))
 names (clinical_sample)
 
 #typeof(clinical_sample)
 table(clinical_sample$SAMPLE_TYPE)
 #str(clinical_sample)
+clinical_sample[clinical_sample$SAMPLE_ID == "P-0081657-T01-IM7",]
 ```
 
 names(timeline_diag)
@@ -56,7 +68,7 @@ timeline_diag <-  read.delim2("msk_chord_2024_data/data_timeline_diagnosis.txt",
                    header = TRUE, 
                    sep = "\t", 
                    stringsAsFactors = FALSE)
-#View(timeline_diag)
+View(timeline_diag)
 #unique(timeline_diag$SUBTYPE)
 names(timeline_diag)
 #unique(timeline_diag$STAGE_CDM_DERIVED)
@@ -90,8 +102,8 @@ timeline_progress <-  read.delim("msk_chord_2024_data/data_timeline_progression.
                                 , header = TRUE, 
                                 sep = "\t", 
                                 stringsAsFactors = FALSE)
-#View(timeline_progress)
-names(timeline_progress)
+View(timeline_progress)
+#names(timeline_progress)
 #str(timeline_progress)
 table(timeline_progress$PROGRESSION)
 
@@ -107,7 +119,7 @@ pre_baseline_met <- timeline_progress %>%
 
 ## eligible patients from clinical_patient_data
 
-eligible_patients <- clinical_patient %>%
+eligible_patients <- clinical_features %>%
   filter(PATIENT_ID %in% non_met_baseline$PATIENT_ID) %>%  
   # keep only non-metastatic at sequencing
   filter(!PATIENT_ID %in% pre_baseline_met$PATIENT_ID)      
@@ -147,48 +159,104 @@ ttm_data <- eligible_patients %>%
   filter(!is.na(time),
          time >= 0)   #The latest recorded event for this patient happened before                        #sequencing. we have no post-sequencing follow-up data.
                       #This patient cannot contribute meaningful survival info
-#View(ttm_data)
+View(ttm_data)
 summary(ttm_data$time)
 kable(table(ttm_data$event))
 ttm_data
+
+
+===============================================================================
+
+analysis_df <- ttm_data
+
+
 ```
 
 ```{r}
 #Create a survival object
-library(survival)
 
-surv_obj <- Surv(time = ttm_data$time, # creates the correct structure required for
-                 event = ttm_data$event) # RSF or cox regression
+library(survival)
+surv_obj <- Surv(time = analysis_df$time, # creates the correct structure required 
+                 event = analysis_df$event) # for RSF or cox regression
 
 
 
 ```
 
 ```{r}
+
+### Mutations dataset
+
+mutations <- read.delim("msk_chord_2024_data/data_mutations.txt", 
+                   header = TRUE, 
+                   sep = "\t", 
+                   stringsAsFactors = FALSE)
+#View(mutations)
+#names(mutations)
+unique(mutations$Variant_Classification)
+
+## keep mutations that change the protein sequence - nonsynonymous mutations
+
+
+
+
+## Mapping tumor barcode sample ID to patient ID byTumor_Sample_Barcode
+mutations_clini_merged <- mutations %>%
+  left_join(clinical_sample %>% select(Tumor_Sample_Barcode = SAMPLE_ID, PATIENT_ID, TMB_NONSYNONYMOUS ),
+            by = "Tumor_Sample_Barcode")
+names(mutations_clini_merged)
+
+nonsynonymous_classes <- c(
+  "Missense_Mutation",
+  "Nonsense_Mutation",
+  "Frame_Shift_Del",
+  "Frame_Shift_Ins",
+  "frameshift_insertion",
+  "In_Frame_Del",
+  "In_Frame_Ins",
+  "Splice_Site",
+  "Translation_Start_Site",
+  "Nonstop_Mutation",
+  "nonsynonymous_SNV"
+)
+
+
+mutations_clini_merged_ns <- mutations_clini_merged %>%
+  filter(Variant_Classification %in% nonsynonymous_classes)
+
+mutations_clini_merged_ns
+names(mutations_clini_merged_ns)  
+  
+# selecting top 20 mutated genes
+top_genes <- mutations_clini_merged_ns %>%
+  count(Hugo_Symbol, sort = TRUE) %>%
+  slice_head(n = 20) %>%
+  pull(Hugo_Symbol)
+top_genes
+
+
+### Mergeing mutations+clinical sample in clinical patient+ttm
+
+analysis_df_merged <- analysis_df %>%
+  left_join(clinical_features, by = "PATIENT_ID")%>%
+  left_join(mutations_clini_merged_ns,by = "PATIENT_ID" )
+
+names(analysis_df_merged)
+```
+
+```{r}
+
+## Copy number alterations 
+
 cna <- read.table("msk_chord_2024_data/data_cna.txt", 
                    header = TRUE, 
                    sep = "\t", 
                    stringsAsFactors = FALSE)
 #View(cna)
 names(cna)
-```
-
-```{r}
-
-```
-
-```{r}
-mutations <- read.delim("msk_chord_2024_data/data_mutations.txt", 
-                   header = TRUE, 
-                   sep = "\t", 
-                   stringsAsFactors = FALSE)
-View(mutations)
-names(mutations)
 
 
-```
 
-```{r}
 library(data.table)
 cna_seg <- fread("msk_chord_2024_data/data_cna_hg19.seg")
 head(cna_seg)
@@ -201,7 +269,7 @@ sv <- read.delim("msk_chord_2024_data/data_sv.txt",
                    header = TRUE, 
                    sep = "\t", 
                    stringsAsFactors = FALSE)
-#View(sv)
+View(sv)
 names(sv)
 ```
 
