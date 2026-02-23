@@ -58,7 +58,7 @@ names (clinical_sample)
 #typeof(clinical_sample)
 table(clinical_sample$SAMPLE_TYPE)
 #str(clinical_sample)
-clinical_sample[clinical_sample$SAMPLE_ID == "P-0081657-T01-IM7",]
+clinical_sample[clinical_sample$PATIENT_ID == "P-0000041",]
 ```
 
 names(timeline_diag)
@@ -165,11 +165,11 @@ kable(table(ttm_data$event))
 ttm_data
 
 
-===============================================================================
+#===============================================================================
 
 analysis_df <- ttm_data
 
-
+names(analysis_df)
 ```
 
 ```{r}
@@ -192,19 +192,32 @@ mutations <- read.delim("msk_chord_2024_data/data_mutations.txt",
                    sep = "\t", 
                    stringsAsFactors = FALSE)
 #View(mutations)
-#names(mutations)
+names(mutations)
 unique(mutations$Variant_Classification)
 
 ## keep mutations that change the protein sequence - nonsynonymous mutations
 
 
-
+tmb_df <- clinical_sample %>%
+  filter(PATIENT_ID %in% ttm_data$PATIENT_ID)
+tmb_patient <- tmb_df %>%
+  group_by(PATIENT_ID) %>%
+  summarise(max_TMB = max(TMB_NONSYNONYMOUS, na.rm = TRUE),
+            .groups = "drop")
+nrow(tmb_patient)
+length(tmb_patient$PATIENT_ID)
+length(unique(tmb_patient$PATIENT_ID))
 
 ## Mapping tumor barcode sample ID to patient ID byTumor_Sample_Barcode
 mutations_clini_merged <- mutations %>%
-  left_join(clinical_sample %>% select(Tumor_Sample_Barcode = SAMPLE_ID, PATIENT_ID, TMB_NONSYNONYMOUS ),
+  left_join(clinical_sample %>% select(Tumor_Sample_Barcode = SAMPLE_ID, PATIENT_ID ),
             by = "Tumor_Sample_Barcode")
 names(mutations_clini_merged)
+
+# Filter mutations for eligible patients
+mutations_eligible <- mutations_clini_merged_ns %>%
+  filter(PATIENT_ID %in% ttm_data$PATIENT_ID)
+
 
 nonsynonymous_classes <- c(
   "Missense_Mutation",
@@ -221,27 +234,36 @@ nonsynonymous_classes <- c(
 )
 
 
-mutations_clini_merged_ns <- mutations_clini_merged %>%
+mutations_eligible_ns <- mutations_eligible %>%
   filter(Variant_Classification %in% nonsynonymous_classes)
 
-mutations_clini_merged_ns
+mutations_eligible_ns
 names(mutations_clini_merged_ns)  
   
 # selecting top 20 mutated genes
-top_genes <- mutations_clini_merged_ns %>%
+top_genes <- mutations_eligible_ns %>%
   count(Hugo_Symbol, sort = TRUE) %>%
   slice_head(n = 20) %>%
   pull(Hugo_Symbol)
 top_genes
 
+### Created a Binary Matrix
+mutation_matrix <- mutations_eligible_ns %>%
+  filter(Hugo_Symbol %in% top_genes) %>%
+  distinct(PATIENT_ID, Hugo_Symbol ) %>% #one row per PATIENT_ID.
+  mutate(value = 1) %>%
+  pivot_wider(
+    names_from = Hugo_Symbol,
+    values_from = value,
+    values_fill = 0
+  )
+#View(mutation_matrix)
+nrow(mutation_matrix)
+names(mutation_matrix)
 
-### Mergeing mutations+clinical sample in clinical patient+ttm
 
-analysis_df_merged <- analysis_df %>%
-  left_join(clinical_features, by = "PATIENT_ID")%>%
-  left_join(mutations_clini_merged_ns,by = "PATIENT_ID" )
 
-names(analysis_df_merged)
+
 ```
 
 ```{r}
@@ -262,6 +284,44 @@ cna_seg <- fread("msk_chord_2024_data/data_cna_hg19.seg")
 head(cna_seg)
 View(cna_seg)
 names(cna_seg)
+
+
+#Mapping ID to Patient ID
+cna_seg_mapped <- cna_seg %>%
+  left_join(clinical_sample %>%
+              select(SAMPLE_ID, PATIENT_ID),
+            by = c("ID" = "SAMPLE_ID"))
+
+# Filter mutations for eligible patients
+cna_eligible <- cna_seg_mapped %>%
+  filter(PATIENT_ID %in% ttm_data$PATIENT_ID)
+
+
+## Global cna burden
+
+cna_burden <- cna_eligible %>%
+  mutate(
+    segment_length = loc.end - loc.start,
+    altered = abs(seg.mean) > 0.3
+  ) %>%
+  group_by(ID, PATIENT_ID) %>%
+  summarise(
+    total_length = sum(segment_length),
+    altered_length = sum(segment_length[altered]),
+    global_cna_burden = altered_length / total_length,
+    .groups = "drop")
+
+#CNA: global burden per patient (take max per patient)
+
+cna_patient <- cna_burden %>%
+  group_by(PATIENT_ID) %>%
+  summarise(global_cna_burden = max(global_cna_burden, na.rm = TRUE),
+            .groups = "drop")
+
+
+nrow(cna_patient)
+length(cna_patient$PATIENT_ID)
+length(unique(cna_patient$PATIENT_ID))
 ```
 
 ```{r}
@@ -271,6 +331,78 @@ sv <- read.delim("msk_chord_2024_data/data_sv.txt",
                    stringsAsFactors = FALSE)
 View(sv)
 names(sv)
+str(sv)
+
+library(dplyr)
+library(tidyr)
+library(data.table)
+
+unique(sv$Class)
+
+# --- 2. Map SAMPLE_ID to PATIENT_ID ---
+sv_data_mapped <- sv %>%
+  left_join(clinical_sample %>% select(SAMPLE_ID, PATIENT_ID),
+            by = c("Sample_Id" = "SAMPLE_ID"))
+
+# --- 3. Filter only eligible patients ---
+sv_data_filtered <- sv_data_mapped %>%
+  filter(PATIENT_ID %in% ttm_data$PATIENT_ID)
+
+# --- 4. Count SVs by type per patient ---
+sv_counts <- sv_data_filtered %>%
+  group_by(PATIENT_ID, Class) %>%
+  summarise(count = n(), .groups = "drop")
+View(sv_counts)
+table(sv_counts$Class == "", useNA = "ifany")
+table(is.na(sv_counts$Class))
+
+# --- 5. Pivot to patient-level feature matrix ---
+sv_counts <- sv_counts %>%
+  mutate(Class = ifelse(Class == "", "UNKNOWN", Class))
+
+unique(sv_counts$Class)
+
+sv_matrix <- sv_counts %>%
+  pivot_wider(names_from = Class,
+              values_from = count,
+              values_fill = 0)  # missing types get 0
+
+# --- 6. Add total SV count ---
+sv_total_count_matrix <- sv_matrix %>%
+  rowwise() %>%
+  mutate(total_SV_count = sum(c_across(-PATIENT_ID))) %>%
+  ungroup()
+
+# --- 7. View final patient-level SV matrix ---
+
+head(sv_total_count_matrix)
+nrow(sv_total_count_matrix)
+```
+
+```{r}
+
+
+
+analysis_df_final <- analysis_df %>%
+  left_join(mutation_matrix, by = "PATIENT_ID") %>%
+  left_join(tmb_patient, by = "PATIENT_ID") %>%
+  left_join(cna_patient, by = "PATIENT_ID") %>%
+  left_join(sv_total_count_matrix, by = "PATIENT_ID")
+
+#View(analysis_df)
+
+analysis_df[is.na(analysis_df)] <- 0
+
+
+
+kable(table(analysis_df$event))
+length(unique(analysis_df$PATIENT_ID))
+
+###==================Final table for RFS analysis=====================
+analysis_df_final
+
+nrow(analysis_df_final)
+n_distinct(analysis_df$PATIENT_ID)
 ```
 
 ```{r}
