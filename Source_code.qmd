@@ -381,28 +381,28 @@ nrow(sv_total_count_matrix)
 
 ```{r}
 
+### Merging ttm data + clinical + Demographic + genomic features of eligible patients
 
-
-analysis_df_final <- analysis_df %>%
+patient_features <- analysis_df %>%
+  select(PATIENT_ID)%>%
   left_join(mutation_matrix, by = "PATIENT_ID") %>%
   left_join(tmb_patient, by = "PATIENT_ID") %>%
   left_join(cna_patient, by = "PATIENT_ID") %>%
   left_join(sv_total_count_matrix, by = "PATIENT_ID")
+patient_features[is.na(patient_features)] <- 0
 
 #View(analysis_df)
 
-analysis_df[is.na(analysis_df)] <- 0
-
-
-
-kable(table(analysis_df$event))
-length(unique(analysis_df$PATIENT_ID))
+kable(table(patient_features$event))
 
 ###==================Final table for RFS analysis=====================
-analysis_df_final
+patient_features
 
 nrow(analysis_df_final)
 n_distinct(analysis_df$PATIENT_ID)
+
+####======================================================================
+#View(patient_features)
 ```
 
 ```{r}
@@ -426,62 +426,6 @@ panel_genes <- list(
   IMPACT505 = impact505
 )
 panel_genes
-```
-
-```{r}
-getwd
-
-timeline_progress <-  read.delim("msk_chord_2024_data/data_timeline_progression.txt"
-                                , header = TRUE, 
-                                sep = "\t", 
-                                stringsAsFactors = FALSE)
-View(timeline_progress)
-names(timeline_progress)
-str(timeline_progress)
-table(timeline_progress$PROGRESSION)
-
-pre_baseline_met <- timeline_progress %>%
-  filter(
-    START_DATE <= 0,
-    PROGRESSION == "Y"
-  ) %>%
-  distinct(PATIENT_ID)
-
-clinical_patient <- clinical_patient %>%
-  rename(PATIENT_ID = X.Patient.Identifier)
-
-eligible_patients <- clinical_patient %>%
-  filter(!PATIENT_ID %in% pre_baseline_met$PATIENT_ID)
-
-
-met_events <- timeline_progress %>%
-  mutate(across(where(is.character), trimws)) %>%
-  filter(START_DATE > 0,
-         PROGRESSION == "Y") %>%
-  group_by(PATIENT_ID) %>%
-  summarise(first_met_day = min(START_DATE))
-
-View(met_events)
-
-last_followup <- timeline_progress %>%
-  group_by(PATIENT_ID) %>%
-  summarise(last_day = max(START_DATE, na.rm = TRUE))
-View(last_followup)
-
-ttm_data <- eligible_patients %>%
-  left_join(met_events, by = "PATIENT_ID") %>%
-  left_join(last_followup, by = "PATIENT_ID") %>%
-  mutate(
-    event = ifelse(!is.na(first_met_day), 1, 0),
-    time  = ifelse(event == 1,
-                   first_met_day,
-                   last_day)
-  )
-
-#View(ttm_data)
-summary(ttm_data$time)
-table(ttm_data$event)
-
 ```
 
 ```{r}
