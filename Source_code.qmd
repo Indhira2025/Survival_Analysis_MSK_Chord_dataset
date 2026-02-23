@@ -500,19 +500,19 @@ patient_clusters <- patient_features %>%
 kable(patient_clusters)
 
 ```
-This looks like:
+
+Cluster 5 likely represents:
 
 KRAS + TP53 + SMAD4 co-altered aggressive phenotype
 
 This pattern is typical of very unstable tumors.
 
-Cluster 5 likely represents:
-
 Genomically unstable
 Strong oncogenic signaling
 High metastatic potential
 
-RSF clustering has separated:
+
+# RSF clustering has separated:
 
 cluster5:  TP53+KRAS+SMAD4 aggressive subtype
 
@@ -531,7 +531,50 @@ This is biologically meaningful.
 This is not random clustering.
 This reflects oncogenic architecture.
 
-shorter:
+
+# References
+1. Kawaguchi et al. (2019)
+Kawaguchi, Y., Kopetz, S., Newhook, T. E., Morris, V. K., Overman, M. J., Frankel, W. L., … & Eng, C. (2019). Mutation status of RAS, TP53, and SMAD4 is superior to RAS alone for predicting prognosis after resection of colorectal liver metastases. Clinical Cancer Research, 25(19), 5843–5851. https://doi.org/10.1158/1078-0432.CCR-19-1293
+
+2. Wang et al. (2022)
+Wang, C., Sandhu, J., Tsao, A., & Fakih, M. (2022). Presence of concurrent TP53 mutations is necessary to predict poor outcomes within the SMAD4 mutated subgroup of metastatic colorectal cancer. Cancers, 14(15), 3644. https://doi.org/10.3390/cancers14153644
+
+3. Gu et al. (2020)
+Gu, Y., Ji, Y., Jiang, H., & Qiu, G. (2020). Clinical effect of driver mutations of KRAS, CDKN2A/P16, TP53, and SMAD4 in pancreatic cancer: A meta-analysis. Genetic Testing and Molecular Biomarkers, 24(12), 777–788. https://doi.org/10.1089/gtmb.2020.0086
+
+4. (Mechanistic Support) Nature Communications study (2021)
+Zhang, X., Li, C., Wang, L., Ren, M., Yang, Z., Xu, Y., … & Wang, J. (2021). Loss of Smad4 promotes aggressive lung cancer metastasis in KRAS/p53 mutant mice. Nature Communications, 12, 4576. https://doi.org/10.1038/s41467-021-24898-9
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Methods
+### shorter:
 
 We trained a Random Survival Forest (RSF) using patient-level genomic features—including nonsynonymous mutations, structural variant counts, and global copy number alteration burden—as predictors, with time-to-metastasis and event status as the outcome. The forest was grown with 1,000 trees, and out-of-bag (OOB) samples were used to obtain unbiased error estimates and to compute a patient-level proximity matrix reflecting survival-relevant similarity. The proximity matrix was converted to a distance matrix and used for hierarchical clustering, with the optimal number of clusters determined by silhouette width and stability analysis. Resulting clusters were interpreted as genomic phenotypes informed by shared survival-associated patterns.
 
