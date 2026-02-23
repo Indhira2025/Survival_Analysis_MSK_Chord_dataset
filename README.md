@@ -1,8 +1,4 @@
----
-editor_options: 
-  markdown: 
-    wrap: 72
----
+
 
 # MSK-CHORD Dashboard: Interactive Exploration of Metastasis and Genomics
 
