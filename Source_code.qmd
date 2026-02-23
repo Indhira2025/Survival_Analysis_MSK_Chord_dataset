@@ -157,30 +157,19 @@ ttm_data <- eligible_patients %>%
                    last_day)
   ) %>%
   filter(!is.na(time),
-         time >= 0)   #The latest recorded event for this patient happened before                        #sequencing. we have no post-sequencing follow-up data.
+        time > 0)   #The latest recorded event for this patient happened before                        #sequencing. we have no post-sequencing follow-up data.
                       #This patient cannot contribute meaningful survival info
 View(ttm_data)
 summary(ttm_data$time)
 kable(table(ttm_data$event))
 ttm_data
-
+sum(ttm_data$time ==  0)
 
 #===============================================================================
 
 analysis_df <- ttm_data
 
 names(analysis_df)
-```
-
-```{r}
-#Create a survival object
-
-library(survival)
-surv_obj <- Surv(time = analysis_df$time, # creates the correct structure required 
-                 event = analysis_df$event) # for RSF or cox regression
-
-
-
 ```
 
 ```{r}
@@ -215,7 +204,7 @@ mutations_clini_merged <- mutations %>%
 names(mutations_clini_merged)
 
 # Filter mutations for eligible patients
-mutations_eligible <- mutations_clini_merged_ns %>%
+mutations_eligible <- mutations_clini_merged %>%
   filter(PATIENT_ID %in% ttm_data$PATIENT_ID)
 
 
@@ -238,7 +227,7 @@ mutations_eligible_ns <- mutations_eligible %>%
   filter(Variant_Classification %in% nonsynonymous_classes)
 
 mutations_eligible_ns
-names(mutations_clini_merged_ns)  
+
   
 # selecting top 20 mutated genes
 top_genes <- mutations_eligible_ns %>%
@@ -384,7 +373,7 @@ nrow(sv_total_count_matrix)
 ### Merging ttm data + clinical + Demographic + genomic features of eligible patients
 
 patient_features <- analysis_df %>%
-  select(PATIENT_ID)%>%
+  select(PATIENT_ID, time, event)%>%
   left_join(mutation_matrix, by = "PATIENT_ID") %>%
   left_join(tmb_patient, by = "PATIENT_ID") %>%
   left_join(cna_patient, by = "PATIENT_ID") %>%
@@ -398,12 +387,178 @@ kable(table(patient_features$event))
 ###==================Final table for RFS analysis=====================
 patient_features
 
-nrow(analysis_df_final)
+nrow(patient_features)
 n_distinct(analysis_df$PATIENT_ID)
+patient_features[patient_features$time == 0,]
 
 ####======================================================================
 #View(patient_features)
 ```
+
+```{r}
+### RSF Clustering
+
+#Create a survival object
+#install.packages("randomForestSRC")
+library(randomForestSRC)
+library(survival)
+surv_obj <- Surv(time = patient_features$time, # creates the correct structure                                                                              required 
+                 event = patient_features$event) # for RSF or cox regression
+
+
+
+
+# Remove ID column for modeling
+rsf_data <- patient_features %>%
+  select(-PATIENT_ID)
+
+# Fit RSF
+set.seed(123)
+
+rsf_model <- rfsrc(
+  Surv(time, event) ~ .,
+  data = rsf_data,
+  ntree = 1000,
+  proximity = TRUE
+)
+
+prox_matrix <- rsf_model$proximity
+View(prox_matrix)
+dim(prox_matrix)
+
+# Create distance Matrix
+
+dist_matrix <- 1 - prox_matrix
+dist_matrix
+
+# create distance object
+dist_obj <- as.dist(dist_matrix)
+dist_obj
+
+# Determine Optimal Number of Clusters (Silhouette Method)
+
+library(cluster)
+
+sil_width <- c()
+
+for (k in 2:6) {
+  pam_fit <- pam(dist_obj, k = k, diss = TRUE)
+  sil_width[k] <- pam_fit$silinfo$avg.width
+}
+
+plot(2:6, sil_width[2:6], type = "b",
+     xlab = "Number of clusters",
+     ylab = "Average Silhouette Width")
+optimal_k <- which.max(sil_width)
+optimal_k
+
+```
+
+```{r}
+#Final Clustering (PAM)
+pam_final <- pam(dist_obj,
+                 k = optimal_k,
+                 diss = TRUE)
+
+patient_features$cluster <- factor(pam_final$clustering)
+#patient_features$cluster
+
+```
+
+```{r}
+
+# Validate Survival Separation
+
+fit <- survfit(Surv(time, event) ~ cluster,
+               data = patient_features)
+
+plot(fit, col = 1:optimal_k, lwd = 2,
+     xlab = "Time",
+     ylab = "MFS Probability")
+
+legend("bottomleft",
+       legend = levels(patient_features$cluster),
+       col = 1:optimal_k,
+       lwd = 2)
+
+#=============================================================================
+### This is a log-rank test, which tests:
+
+###Are survival (time-to-metastasis) curves different across clusters?
+
+
+survdiff(Surv(time, event) ~ cluster,
+         data = patient_features)
+```
+```{r}
+
+### Patient_clusters 
+patient_clusters <- patient_features %>%
+  group_by(cluster) %>%
+  summarise(across(where(is.numeric), mean))
+
+kable(patient_clusters)
+
+```
+This looks like:
+
+KRAS + TP53 + SMAD4 co-altered aggressive phenotype
+
+This pattern is typical of very unstable tumors.
+
+Cluster 5 likely represents:
+
+Genomically unstable
+Strong oncogenic signaling
+High metastatic potential
+
+RSF clustering has separated:
+
+cluster5:  TP53+KRAS+SMAD4 aggressive subtype
+
+cluster 6: TP53+KRAS-only subtype
+
+cluster3 :  TP53-only subtype
+
+cluster4 : KRAS-only subtype
+
+cluster2: Genomically quiet subtype
+
+cluster 1: Intermediate complex subtype
+
+This is biologically meaningful.
+
+This is not random clustering.
+This reflects oncogenic architecture.
+
+shorter:
+
+We trained a Random Survival Forest (RSF) using patient-level genomic features—including nonsynonymous mutations, structural variant counts, and global copy number alteration burden—as predictors, with time-to-metastasis and event status as the outcome. The forest was grown with 1,000 trees, and out-of-bag (OOB) samples were used to obtain unbiased error estimates and to compute a patient-level proximity matrix reflecting survival-relevant similarity. The proximity matrix was converted to a distance matrix and used for hierarchical clustering, with the optimal number of clusters determined by silhouette width and stability analysis. Resulting clusters were interpreted as genomic phenotypes informed by shared survival-associated patterns.
+
+## Methods
+
+### Patient Cohort and Data Preprocessing
+
+Clinical and genomic data for patients were obtained from the MSK CHORD cohort. Patients with metastasis at or prior to the time of sequencing were excluded to ensure analysis of post-sequencing outcomes. Clinical covariates including age, sex, race, and smoking status were retained for descriptive purposes but not included in the genomic clustering model. Genomic features included nonsynonymous somatic mutations (top 20 most frequently mutated genes), global copy number alteration (CNA) burden, and structural variant counts. For patients with multiple tumor samples, features were aggregated at the patient level, and missing values were imputed as zero.
+
+### Random Survival Forest Model
+
+A Random Survival Forest (RSF) was trained using the `randomForestSRC` R package. Time-to-metastasis and event status were specified as the outcome, and patient-level genomic features were used as predictors. The forest was grown with 1,000 trees to ensure model stability. Out-of-bag (OOB) samples, which are the patients excluded from each bootstrap sample used to grow individual trees, were leveraged to provide unbiased estimates of prediction error and to calculate a patient-level proximity matrix. The proximity matrix captures survival-relevant similarity between patients, based on how frequently pairs of patients co-occur in the same terminal nodes across trees.
+
+### Patient Clustering
+
+The OOB-based RSF proximity matrix was transformed into a dissimilarity (distance) matrix by subtracting the proximity values from 1. This distance matrix was used as input for hierarchical clustering with complete linkage. The optimal number of clusters was determined using silhouette width and cluster stability analysis via resampling. Resulting clusters were interpreted as **genomic phenotypes informed by survival structure**, reflecting shared survival-relevant genomic patterns among patients.
+
+### Statistical Analyses
+
+OOB error rates from the RSF were monitored to ensure sufficient forest size and stability. Cluster-specific survival curves were estimated using Kaplan-Meier analysis, and differences between clusters were assessed using the log-rank test. All analyses were conducted in R (version X.X) using the `dplyr`, `tidyr`, and `randomForestSRC` packages.
+
+### Interpretation:
+
+-   Extremely large chi-square statistic
+p-value essentially 0
+Strong evidence that survival differs across clusters
+ RSF-derived clusters are **survival-informative**.
 
 ```{r}
 gene_panel <- read.table("msk_chord_2024_data/data_gene_panel_matrix.txt", 
